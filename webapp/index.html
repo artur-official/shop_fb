@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+updated_index_html = '''<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
@@ -20,6 +20,9 @@
                     <button class="cart-btn" onclick="showCart()">
                         <span class="cart-icon">🛒</span>
                         <span class="cart-count" id="cartCount">0</span>
+                    </button>
+                    <button class="profile-btn" onclick="showProfile()">
+                        <span class="profile-icon">👤</span>
                     </button>
                 </div>
             </div>
@@ -136,12 +139,12 @@
                         <div class="checkout-total" id="checkoutTotal">0 USDT</div>
                     </div>
                     <div class="checkout-info">
-                        <p>После нажатия кнопки «Оплатить» вы будете перенаправлены на оплату через CryptoBot.</p>
-                        <p>После подтверждения оплаты аккаунты будут выданы автоматически.</p>
+                        <p>Средства будут списаны с вашего баланса.</p>
+                        <p>После оплаты аккаунты будут выданы автоматически.</p>
                     </div>
                     <button class="btn btn-primary btn-large" onclick="processPayment()">
                         <span class="btn-icon">💎</span>
-                        Оплатить через CryptoBot
+                        Оплатить с баланса
                     </button>
                 </div>
             </div>
@@ -166,6 +169,62 @@
                     <!-- Orders will be rendered here -->
                 </div>
             </div>
+
+            <!-- Profile Screen -->
+            <div id="profileScreen" class="screen">
+                <div class="screen-header">
+                    <button class="back-btn" onclick="showHome()">← Назад</button>
+                    <h2 class="screen-title">Личный кабинет</h2>
+                </div>
+                
+                <!-- Profile Header -->
+                <div class="profile-header">
+                    <div class="profile-avatar" id="profileAvatar">👤</div>
+                    <div class="profile-info">
+                        <div class="profile-name" id="profileName">Загрузка...</div>
+                        <div class="profile-username" id="profileUsername"></div>
+                        <div class="profile-balance">
+                            <span class="balance-label">Баланс:</span>
+                            <span class="balance-value" id="profileBalance">0.00 USDT</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Profile Tabs -->
+                <div class="profile-tabs">
+                    <button class="profile-tab-btn active" onclick="showProfileTab('deposit')">
+                        <span class="tab-icon">💰</span>
+                        <span class="tab-label">Пополнить</span>
+                    </button>
+                    <button class="profile-tab-btn" onclick="showProfileTab('purchases')">
+                        <span class="tab-icon">🛒</span>
+                        <span class="tab-label">Покупки</span>
+                    </button>
+                    <button class="profile-tab-btn" onclick="showProfileTab('payments')">
+                        <span class="tab-icon">📋</span>
+                        <span class="tab-label">Платежи</span>
+                    </button>
+                </div>
+                
+                <!-- Tab Contents -->
+                <div class="profile-tab-content active" id="depositTab">
+                    <div id="depositContent">
+                        <!-- Deposit content rendered by JS -->
+                    </div>
+                </div>
+                
+                <div class="profile-tab-content" id="purchasesTab">
+                    <div id="purchasesContent">
+                        <!-- Purchases content rendered by JS -->
+                    </div>
+                </div>
+                
+                <div class="profile-tab-content" id="paymentsTab">
+                    <div id="paymentsContent">
+                        <!-- Payments content rendered by JS -->
+                    </div>
+                </div>
+            </div>
         </main>
 
         <!-- Bottom Navigation -->
@@ -185,11 +244,21 @@
             </button>
             <button class="nav-btn" onclick="showOrders()">
                 <span class="nav-icon">📋</span>
-                <span class="nav-label">Заказы</span>
+                <span class="nav-label">Покупки</span>
+            </button>
+            <button class="nav-btn" onclick="showProfile()">
+                <span class="nav-icon">👤</span>
+                <span class="nav-label">Профиль</span>
             </button>
         </nav>
     </div>
 
     <script src="js/app.js"></script>
 </body>
-</html>
+</html>'''
+
+with open('/mnt/agents/output/index.html', 'w', encoding='utf-8') as f:
+    f.write(updated_index_html)
+
+print("✅ index.html создан!")
+print(f"Размер: {len(updated_index_html)} символов")

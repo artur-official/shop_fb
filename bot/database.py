@@ -1,4 +1,4 @@
-import sqlite3
+updated_database_py = '''import sqlite3
 import json
 from config import DATABASE_PATH
 
@@ -10,6 +10,7 @@ class Database:
         self.init_tables()
 
     def init_tables(self):
+        # ===== PRODUCTS =====
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS products (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -30,6 +31,7 @@ class Database:
             )
         """)
 
+        # ===== ORDERS =====
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS orders (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,6 +49,7 @@ class Database:
             )
         """)
 
+        # ===== USERS =====
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
@@ -56,6 +59,32 @@ class Database:
                 language TEXT DEFAULT 'ru',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # ===== BALANCES =====
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS balances (
+                user_id INTEGER PRIMARY KEY,
+                balance REAL DEFAULT 0.0,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(user_id)
+            )
+        """)
+
+        # ===== TRANSACTIONS =====
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                type TEXT NOT NULL,
+                amount REAL NOT NULL,
+                status TEXT DEFAULT 'pending',
+                description TEXT,
+                plisio_invoice_id TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                completed_at TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(user_id)
             )
         """)
 
@@ -365,6 +394,59 @@ class Database:
         row = self.cursor.fetchone()
         return dict(row) if row else None
 
+    # ===== BALANCE =====
+    def get_balance(self, user_id):
+        self.cursor.execute("SELECT balance FROM balances WHERE user_id = ?", (user_id,))
+        row = self.cursor.fetchone()
+        if row:
+            return row[0]
+        self.cursor.execute("INSERT INTO balances (user_id, balance) VALUES (?, 0.0)", (user_id,))
+        self.conn.commit()
+        return 0.0
+
+    def add_balance(self, user_id, amount):
+        self.cursor.execute("""
+            INSERT INTO balances (user_id, balance) VALUES (?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET balance = balance + ?, updated_at = CURRENT_TIMESTAMP
+        """, (user_id, amount, amount))
+        self.conn.commit()
+
+    def deduct_balance(self, user_id, amount):
+        current = self.get_balance(user_id)
+        if current < amount:
+            return False
+        self.cursor.execute("""
+            UPDATE balances SET balance = balance - ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?
+        """, (amount, user_id))
+        self.conn.commit()
+        return True
+
+    # ===== TRANSACTIONS =====
+    def create_transaction(self, user_id, type, amount, description=None, plisio_invoice_id=None):
+        self.cursor.execute("""
+            INSERT INTO transactions (user_id, type, amount, description, plisio_invoice_id)
+            VALUES (?, ?, ?, ?, ?)
+        """, (user_id, type, amount, description, plisio_invoice_id))
+        self.conn.commit()
+        return self.cursor.lastrowid
+
+    def get_user_transactions(self, user_id):
+        self.cursor.execute("""
+            SELECT * FROM transactions WHERE user_id = ? ORDER BY created_at DESC
+        """, (user_id,))
+        return [dict(row) for row in self.cursor.fetchall()]
+
+    def update_transaction_status(self, transaction_id, status):
+        self.cursor.execute("""
+            UPDATE transactions SET status = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?
+        """, (status, transaction_id))
+        self.conn.commit()
+
+    def get_transaction_by_plisio_id(self, plisio_invoice_id):
+        self.cursor.execute("SELECT * FROM transactions WHERE plisio_invoice_id = ?", (plisio_invoice_id,))
+        row = self.cursor.fetchone()
+        return dict(row) if row else None
+
     # ===== STATS =====
     def get_stats(self):
         self.cursor.execute("SELECT COUNT(*) FROM products")
@@ -385,6 +467,9 @@ class Database:
         self.cursor.execute("SELECT COUNT(*) FROM users")
         total_users = self.cursor.fetchone()[0]
 
+        self.cursor.execute("SELECT COALESCE(SUM(balance), 0) FROM balances")
+        total_balance = self.cursor.fetchone()[0]
+
         return {
             'total_products': total_products,
             'available_products': available_products,
@@ -393,7 +478,16 @@ class Database:
             'paid_orders': paid_orders,
             'pending_orders': total_orders - paid_orders,
             'total_revenue': total_revenue,
-            'total_users': total_users
+            'total_users': total_users,
+            'total_balance': total_balance
         }
 
 db = Database()
+'''
+
+# Save to output file
+with open('/mnt/agents/output/database.py', 'w', encoding='utf-8') as f:
+    f.write(updated_database_py)
+
+print("✅ database.py создан!")
+print(f"Размер: {len(updated_database_py)} символов")
