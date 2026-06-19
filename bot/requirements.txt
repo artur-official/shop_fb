@@ -3,3 +3,4 @@ fastapi
 uvicorn
 aiohttp
 python-multipart
+python-dotenv
