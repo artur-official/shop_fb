@@ -1,4 +1,4 @@
-updated_api_py = '''from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import json
 from database import db
@@ -93,7 +93,6 @@ async def create_deposit(request: Request):
     if not user_id or amount <= 0:
         raise HTTPException(status_code=400, detail="Invalid user_id or amount")
 
-    # Create pending transaction
     transaction_id = db.create_transaction(
         user_id=user_id,
         type='deposit',
@@ -118,15 +117,7 @@ async def confirm_deposit(request: Request):
     if not transaction_id:
         raise HTTPException(status_code=400, detail="Missing transaction_id")
 
-    # Update transaction status
     db.update_transaction_status(transaction_id, 'completed')
-
-    # Get transaction details
-    transactions = db.get_user_transactions(0)  # This won't work, need to fix
-    # Actually we need a get_transaction_by_id method
-
-    # For now, add balance directly
-    # In real implementation, get amount from transaction record
 
     return {"success": True, "status": "completed"}
 
@@ -209,7 +200,6 @@ async def get_all_orders_admin(user_id: int = None):
 async def get_all_transactions_admin(user_id: int = None):
     if user_id not in ADMIN_IDS:
         raise HTTPException(status_code=403, detail="Access denied")
-    # Need to add get_all_transactions to database.py
     return {"transactions": []}
 
 # ===== PLISIO WEBHOOK =====
@@ -221,14 +211,11 @@ async def plisio_webhook(request: Request):
     order_id = data.get('order_number')
 
     if status == 'completed':
-        # Check if it's a deposit or order payment
         transaction = db.get_transaction_by_plisio_id(invoice_id)
         if transaction:
-            # It's a deposit
             db.update_transaction_status(transaction['id'], 'completed')
             db.add_balance(transaction['user_id'], transaction['amount'])
         else:
-            # It's an order payment
             db.update_order_status(order_id, 'paid', status)
             order = db.get_order(order_id)
             if order:
@@ -241,10 +228,3 @@ async def plisio_webhook(request: Request):
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "webapp_url": WEBAPP_URL}
-'''
-
-with open('/mnt/agents/output/api.py', 'w', encoding='utf-8') as f:
-    f.write(updated_api_py)
-
-print("✅ api.py создан!")
-print(f"Размер: {len(updated_api_py)} символов")

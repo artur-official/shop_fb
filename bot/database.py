@@ -1,4 +1,4 @@
-updated_database_py = '''import sqlite3
+import sqlite3
 import json
 from config import DATABASE_PATH
 
@@ -483,11 +483,3 @@ class Database:
         }
 
 db = Database()
-'''
-
-# Save to output file
-with open('/mnt/agents/output/database.py', 'w', encoding='utf-8') as f:
-    f.write(updated_database_py)
-
-print("✅ database.py создан!")
-print(f"Размер: {len(updated_database_py)} символов")
