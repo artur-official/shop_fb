@@ -32,7 +32,7 @@ body {
     position: relative;
 }
 
-/* HEADER - белая шапка */
+/* HEADER - 弍亠仍舒� �舒仗从舒 */
 .header {
     background: #fff;
     padding: 12px 16px;
@@ -307,14 +307,14 @@ body {
     margin-bottom: 20px;
 }
 
-/* PROFILE - ИСПРАВЛЕНО */
+/* PROFILE - �弌�������� */
 .profile-hero {
     text-align: center;
     padding: 40px 20px;
     margin-bottom: 20px;
 }
 
-/* Привет, Саша! - шрифт побольше */
+/* ��亳于亠�, 弌舒�舒! - ��亳�� 仗仂弍仂仍��亠 */
 .profile-greeting {
     font-size: 22px;
     color: var(--text2);
@@ -326,7 +326,7 @@ body {
     font-weight: 600;
 }
 
-/* + ПОПОЛНИТЬ БАЛАНС - меньше, hover */
+/* + �������丐亂 �����弌 - 仄亠仆��亠, hover */
 .profile-deposit-btn {
     font-size: 10px;
     color: var(--text2);
@@ -343,7 +343,7 @@ body {
     color: var(--accent);
 }
 
-/* Баланс - меньше, кликабельный, на отдельной строке, со свечением */
+/* �舒仍舒仆� - 仄亠仆��亠, 从仍亳从舒弍亠仍�仆�亶, 仆舒 仂�亟亠仍�仆仂亶 ���仂从亠, �仂 �于亠�亠仆亳亠仄 */
 .profile-balance {
     font-size: 36px;
     font-weight: 300;
@@ -499,6 +499,187 @@ body {
 
 .transaction-amount {
     font-weight: 700;
+}
+
+
+/* PRODUCT CARD - NEW DESIGN */
+.product-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 16px;
+    margin-bottom: 12px;
+    transition: transform 0.2s;
+}
+
+.product-card:hover {
+    transform: translateY(-2px);
+}
+
+.product-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    cursor: pointer;
+}
+
+.product-card-icon {
+    font-size: 20px;
+}
+
+.product-card-title {
+    font-size: 14px;
+    font-weight: 600;
+    flex: 1;
+    line-height: 1.4;
+}
+
+.product-card-body {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+}
+
+.product-card-price {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1;
+}
+
+.product-card-stock {
+    font-size: 12px;
+    color: var(--success);
+    margin-top: 4px;
+}
+
+.product-card-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-end;
+}
+
+.btn-buy {
+    background: var(--accent);
+    border: none;
+    border-radius: 12px;
+    padding: 10px 20px;
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+}
+
+.btn-buy:hover {
+    opacity: 0.9;
+}
+
+.btn-buy:disabled {
+    background: #333;
+    color: #666;
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+.btn-add-cart {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 8px 16px;
+    color: var(--text2);
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.btn-add-cart:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+/* PRODUCT DETAIL - NEW DESIGN */
+.product-detail-header {
+    margin-bottom: 20px;
+}
+
+.product-detail-title {
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1.4;
+    margin-bottom: 16px;
+}
+
+.product-detail-price-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.product-detail-price {
+    font-size: 36px;
+    font-weight: 700;
+}
+
+.product-detail-stock {
+    background: rgba(78, 205, 196, 0.1);
+    color: var(--success);
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.product-detail-actions {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 24px;
+}
+
+.product-detail-actions .btn-buy {
+    flex: 1;
+    justify-content: center;
+    padding: 14px;
+    font-size: 16px;
+}
+
+.product-detail-actions .btn-add-cart {
+    flex: 1;
+    padding: 14px;
+    font-size: 14px;
+    text-align: center;
+}
+
+.product-detail-section {
+    margin-bottom: 20px;
+}
+
+.product-detail-section h3 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    color: var(--text);
+}
+
+.product-detail-description {
+    color: var(--text2);
+    line-height: 1.6;
+    font-size: 14px;
+}
+
+/* OUT OF STOCK */
+.product-card.out-of-stock {
+    opacity: 0.6;
+}
+
+.product-card.out-of-stock .product-card-stock {
+    color: #ff6b6b;
 }
 
 /* ORDER */

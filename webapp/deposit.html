@@ -1,0 +1,582 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Пополнение баланса</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        :root {
+            --bg: #1a1a2e;
+            --card: #252542;
+            --accent: #6366f1;
+            --text: #f1f5f9;
+            --text2: #94a3b8;
+            --border: #3d3d5c;
+            --success: #22c55e;
+            --danger: #ef4444;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        .header {
+            background: var(--bg);
+            padding: 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .header-title {
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .back-btn {
+            background: none;
+            border: none;
+            color: var(--text);
+            font-size: 24px;
+            cursor: pointer;
+        }
+
+        .container {
+            padding: 20px 16px;
+        }
+
+        .step-indicator {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+
+        .step-number {
+            display: inline-block;
+            background: var(--accent);
+            color: white;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            font-size: 14px;
+            font-weight: 700;
+            line-height: 24px;
+            margin-right: 8px;
+        }
+
+        .step-text {
+            color: var(--text2);
+            font-size: 14px;
+        }
+
+        .currency-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .currency-item {
+            background: var(--card);
+            border: 2px solid transparent;
+            border-radius: 16px;
+            padding: 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .currency-item.selected {
+            border-color: var(--accent);
+        }
+
+        .currency-icon {
+            font-size: 32px;
+            width: 40px;
+            text-align: center;
+        }
+
+        .currency-info {
+            flex: 1;
+        }
+
+        .currency-name {
+            font-weight: 600;
+            font-size: 16px;
+        }
+
+        .currency-network {
+            font-size: 13px;
+            color: var(--text2);
+        }
+
+        .currency-check {
+            width: 24px;
+            height: 24px;
+            border: 2px solid var(--border);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            color: transparent;
+        }
+
+        .currency-item.selected .currency-check {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+
+        .amount-section {
+            text-align: center;
+            padding: 40px 0;
+        }
+
+        .amount-input {
+            background: transparent;
+            border: none;
+            color: var(--text);
+            font-size: 48px;
+            font-weight: 300;
+            text-align: center;
+            width: 100%;
+            outline: none;
+        }
+
+        .amount-input::placeholder {
+            color: var(--text2);
+        }
+
+        .amount-currency {
+            font-size: 14px;
+            color: var(--text2);
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            border: none;
+            border-radius: 16px;
+            padding: 16px 24px;
+            color: white;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 20px;
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: transparent;
+            border: none;
+            color: var(--accent);
+            font-size: 14px;
+            cursor: pointer;
+            margin-top: 16px;
+        }
+
+        .payment-info {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 20px;
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+        }
+
+        .payment-warning-icon {
+            font-size: 24px;
+            flex-shrink: 0;
+        }
+
+        .payment-warning-text {
+            font-size: 13px;
+            color: #fca5a5;
+            line-height: 1.5;
+        }
+
+        .qr-section {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .qr-code {
+            width: 120px;
+            height: 120px;
+            background: white;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .qr-code img {
+            width: 100px;
+            height: 100px;
+        }
+
+        .payment-details {
+            flex: 1;
+        }
+
+        .payment-detail-row {
+            margin-bottom: 12px;
+        }
+
+        .payment-detail-label {
+            font-size: 12px;
+            color: var(--text2);
+            margin-bottom: 4px;
+        }
+
+        .payment-detail-value {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--success);
+        }
+
+        .payment-timer {
+            color: var(--danger);
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .wallet-address {
+            background: var(--card);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+            word-break: break-all;
+            font-size: 14px;
+            font-family: monospace;
+        }
+
+        .copy-btn {
+            background: var(--accent);
+            border: none;
+            border-radius: 8px;
+            padding: 8px 16px;
+            color: white;
+            font-size: 14px;
+            cursor: pointer;
+            margin-top: 8px;
+        }
+
+        .cancel-btn {
+            background: var(--danger);
+            border: none;
+            border-radius: 16px;
+            padding: 16px 24px;
+            color: white;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+        }
+
+        .status-badge {
+            display: inline-block;
+            background: rgba(245, 158, 11, 0.2);
+            color: #f59e0b;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            text-align: center;
+            width: 100%;
+            margin-bottom: 16px;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: var(--text2);
+        }
+    </style>
+<base target="_blank">
+</head>
+<body>
+    <div class="header">
+        <button class="back-btn" onclick="goBack()"><</button>
+        <div class="header-title">Пополнение баланса</div>
+        <div style="width: 40px;"></div>
+    </div>
+
+    <div class="container">
+        <!-- Step 1: Select Currency -->
+        <div id="step1">
+            <div class="step-indicator">
+                <span class="step-number">1</span>
+                <span class="step-text">Выберите способ оплаты</span>
+            </div>
+
+            <div class="currency-list">
+                <div class="currency-item selected" data-currency="USDT_TRX" onclick="selectCurrency(this)">
+                    <div class="currency-icon">??</div>
+                    <div class="currency-info">
+                        <div class="currency-name">USDT</div>
+                        <div class="currency-network">TRC-20 (Tron)</div>
+                    </div>
+                    <div class="currency-check">?</div>
+                </div>
+
+                <div class="currency-item" data-currency="USDT_BSC" onclick="selectCurrency(this)">
+                    <div class="currency-icon">??</div>
+                    <div class="currency-info">
+                        <div class="currency-name">USDT</div>
+                        <div class="currency-network">BEP-20 (BNB Smart Chain)</div>
+                    </div>
+                    <div class="currency-check">?</div>
+                </div>
+
+                <div class="currency-item" data-currency="USDT_ETH" onclick="selectCurrency(this)">
+                    <div class="currency-icon">??</div>
+                    <div class="currency-info">
+                        <div class="currency-name">USDT</div>
+                        <div class="currency-network">ERC-20 (Ethereum)</div>
+                    </div>
+                    <div class="currency-check">?</div>
+                </div>
+            </div>
+
+            <button class="btn-primary" onclick="goToStep2()">Продолжить ></button>
+        </div>
+
+        <!-- Step 2: Enter Amount -->
+        <div id="step2" class="hidden">
+            <div class="step-indicator">
+                <span class="step-number">2</span>
+                <span class="step-text">Введите сумму USD</span>
+            </div>
+
+            <div class="amount-section">
+                <div class="amount-input-wrapper">
+                    <input type="number" class="amount-input" id="amountInput" placeholder="0.00" step="0.01" min="1">
+                </div>
+                <div class="amount-currency">USD</div>
+            </div>
+
+            <button class="btn-primary" id="continueBtn" onclick="createInvoice()" disabled>Пополнить 0 USD</button>
+            <button class="btn-secondary" onclick="goToStep1()">Вернуться назад</button>
+        </div>
+
+        <!-- Step 3: Payment Page -->
+        <div id="step3" class="hidden">
+            <div class="loading" id="loadingStep3">Создание инвойса...</div>
+
+            <div id="paymentContent" class="hidden">
+                <div class="payment-info">
+                    <div class="payment-warning-icon">??</div>
+                    <div class="payment-warning-text">
+                        Переведите точную сумму указанным платежом в сети <span id="networkName">TRC-20</span>, 
+                        иначе платеж не будет зачислен. У вас есть 60 минут на оплату счета.
+                    </div>
+                </div>
+
+                <div class="qr-section">
+                    <div class="qr-code" id="qrCode">
+                        <img src="" alt="QR Code" id="qrImage">
+                    </div>
+                    <div class="payment-details">
+                        <div class="payment-detail-row">
+                            <div class="payment-detail-label">Способ оплаты</div>
+                            <div class="payment-detail-value" id="paymentMethod">USDT (TRC-20)</div>
+                        </div>
+                        <div class="payment-detail-row">
+                            <div class="payment-detail-label">К оплате</div>
+                            <div class="payment-detail-value" id="paymentAmount">0 USDT</div>
+                        </div>
+                        <div class="payment-detail-row">
+                            <div class="payment-detail-label">На баланс будет зачислено</div>
+                            <div class="payment-detail-value" id="balanceAmount">$0.00</div>
+                        </div>
+                        <div class="payment-detail-row">
+                            <div class="payment-detail-label">Время на оплату</div>
+                            <div class="payment-timer" id="paymentTimer">59:59</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="wallet-address" id="walletAddress">
+                    Адрес кошелька появится здесь
+                </div>
+                <button class="copy-btn" onclick="copyAddress()">?? Копировать</button>
+
+                <div class="status-badge" id="paymentStatus">? Ожидание платежа</div>
+
+                <button class="cancel-btn" onclick="cancelPayment()">Отменить платеж</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let tg = window.Telegram.WebApp;
+        tg.ready();
+        tg.expand();
+
+        const API_URL = 'https://ingria-farm.com/api';
+        let selectedCurrency = 'USDT_TRX';
+        let currentAmount = 0;
+        let invoiceData = null;
+        let timerInterval = null;
+
+        const tgUser = tg.initDataUnsafe?.user || {};
+        const userId = tgUser.id || 'test_user';
+
+        function goToStep1() {
+            document.getElementById('step1').classList.remove('hidden');
+            document.getElementById('step2').classList.add('hidden');
+            document.getElementById('step3').classList.add('hidden');
+        }
+
+        function goToStep2() {
+            document.getElementById('step1').classList.add('hidden');
+            document.getElementById('step2').classList.remove('hidden');
+            document.getElementById('step3').classList.add('hidden');
+            document.getElementById('amountInput').focus();
+        }
+
+        function goToStep3() {
+            document.getElementById('step1').classList.add('hidden');
+            document.getElementById('step2').classList.add('hidden');
+            document.getElementById('step3').classList.remove('hidden');
+        }
+
+        function goBack() {
+            if (!document.getElementById('step2').classList.contains('hidden')) {
+                goToStep1();
+            } else if (!document.getElementById('step3').classList.contains('hidden')) {
+                goToStep2();
+            } else {
+                tg.close();
+            }
+        }
+
+        function selectCurrency(element) {
+            document.querySelectorAll('.currency-item').forEach(item => {
+                item.classList.remove('selected');
+            });
+            element.classList.add('selected');
+            selectedCurrency = element.dataset.currency;
+        }
+
+        const amountInput = document.getElementById('amountInput');
+        const continueBtn = document.getElementById('continueBtn');
+
+        amountInput.addEventListener('input', function() {
+            currentAmount = parseFloat(this.value) || 0;
+            continueBtn.textContent = 'Пополнить ' + currentAmount.toFixed(2) + ' USD';
+            continueBtn.disabled = currentAmount < 1;
+        });
+
+        async function createInvoice() {
+            if (currentAmount < 1) {
+                tg.showAlert('Минимальная сумма пополнения: 1 USD');
+                return;
+            }
+
+            goToStep3();
+            document.getElementById('loadingStep3').classList.remove('hidden');
+            document.getElementById('paymentContent').classList.add('hidden');
+
+            try {
+                const response = await fetch(API_URL + '/balance/deposit', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        user_id: userId,
+                        amount: currentAmount,
+                        currency: selectedCurrency
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.status === 'success' && data.invoice_url) {
+                    tg.openLink(data.invoice_url);
+
+                    invoiceData = data;
+                    document.getElementById('loadingStep3').classList.add('hidden');
+                    document.getElementById('paymentContent').classList.remove('hidden');
+
+                    document.getElementById('paymentAmount').textContent = currentAmount.toFixed(2) + ' USDT';
+                    document.getElementById('balanceAmount').textContent = '$' + currentAmount.toFixed(2);
+
+                    startTimer(3600);
+                } else {
+                    throw new Error(data.message || 'Ошибка создания инвойса');
+                }
+            } catch (e) {
+                console.error('Invoice error:', e);
+                tg.showAlert('Ошибка: ' + e.message);
+                goToStep2();
+            }
+        }
+
+        function startTimer(seconds) {
+            let remaining = seconds;
+
+            if (timerInterval) clearInterval(timerInterval);
+
+            timerInterval = setInterval(() => {
+                remaining--;
+                if (remaining <= 0) {
+                    clearInterval(timerInterval);
+                    document.getElementById('paymentTimer').textContent = '00:00';
+                    document.getElementById('paymentStatus').textContent = '? Время истекло';
+                    return;
+                }
+
+                const mins = Math.floor(remaining / 60);
+                const secs = remaining % 60;
+                document.getElementById('paymentTimer').textContent = 
+                    mins.toString().padStart(2, '0') + ':' + secs.toString().padStart(2, '0');
+            }, 1000);
+        }
+
+        function copyAddress() {
+            const address = document.getElementById('walletAddress').textContent;
+            navigator.clipboard.writeText(address).then(() => {
+                tg.showAlert('Адрес скопирован!');
+            });
+        }
+
+        function cancelPayment() {
+            if (timerInterval) clearInterval(timerInterval);
+            tg.showAlert('Платеж отменен');
+            goToStep1();
+        }
+
+        tg.setHeaderColor('#1a1a2e');
+        tg.setBackgroundColor('#1a1a2e');
+    </script>
+</body>
+</html>

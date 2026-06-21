@@ -3,6 +3,7 @@
 .env.local
 .env.production
 *.db
+data/
 *.sqlite
 *.sqlite3
 shop.db

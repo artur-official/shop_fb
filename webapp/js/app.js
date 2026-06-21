@@ -55,7 +55,7 @@ function showCheckout() {
         tg.showAlert('Корзина пуста!');
         return;
     }
-    const total = cart.reduce((sum, item) => sum + item.price, 0);
+    const total = cart.reduce((sum, item) => sum + (item.price || 0), 0);
     document.getElementById('checkoutTotal').textContent = total + ' USDT';
     showScreen('checkoutScreen');
 }
@@ -68,14 +68,18 @@ function updateNavActive(index) {
 
 // ===== DEPOSIT =====
 function showDeposit() {
-    tg.showAlert('Пополнение баланса через Plisio');
+    window.location.href = 'deposit.html';
 }
 
 function setupDepositClick() {
-    // Клик на баланс = пополнить
     const balance = document.getElementById('profileBalance');
+    const depositBtn = document.querySelector('.profile-deposit-btn');
+
     if (balance) {
         balance.onclick = () => showDeposit();
+    }
+    if (depositBtn) {
+        depositBtn.onclick = () => showDeposit();
     }
 }
 
@@ -94,9 +98,11 @@ async function loadUserProfile() {
     try {
         const response = await fetch(API_URL + '/user/' + userId);
         const data = await response.json();
-        userBalance = data.balance || 0;
-        document.getElementById('userName').textContent = firstName;
-        document.getElementById('profileBalance').textContent = userBalance.toFixed(2) + '$';
+        if (data.status === 'success') {
+            userBalance = data.data?.balance || 0;
+            document.getElementById('userName').textContent = firstName;
+            document.getElementById('profileBalance').textContent = userBalance.toFixed(2) + '$';
+        }
     } catch (e) {
         console.error('Profile error:', e);
         document.getElementById('userName').textContent = firstName;
@@ -112,7 +118,7 @@ async function loadUserOrders() {
     try {
         const response = await fetch(API_URL + '/orders/' + userId);
         const data = await response.json();
-        const orders = data.orders || [];
+        const orders = data.data || [];
 
         if (orders.length === 0) {
             container.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div><p>Нет покупок</p></div>';
@@ -145,7 +151,7 @@ async function loadUserTransactions() {
     try {
         const response = await fetch(API_URL + '/transactions/' + userId);
         const data = await response.json();
-        const transactions = data.transactions || [];
+        const transactions = data.data || [];
 
         if (transactions.length === 0) {
             container.innerHTML = '<div class="empty-state"><div class="empty-icon">💳</div><p>Нет транзакций</p></div>';
@@ -185,59 +191,96 @@ async function loadProducts() {
 
         const response = await fetch(url);
         const data = await response.json();
-        return data.products || [];
+        console.log('API response:', data);
+        return data.data || [];
     } catch (e) {
+        console.error('Load products error:', e);
         return [];
     }
 }
 
 async function renderProducts() {
     const grid = document.getElementById('productsGrid');
-    if (!grid) return;
-
-    grid.innerHTML = '<div class="loading">Загрузка...</div>';
-    let products = await loadProducts();
-    if (currentCategory !== 'all') products = products.filter(p => p.category === currentCategory);
-
-    if (products.length === 0) {
-        grid.innerHTML = '<div class="empty-state"><p>Ничего не найдено</p></div>';
+    if (!grid) {
+        console.error('productsGrid not found');
         return;
     }
 
-    grid.innerHTML = products.map(p => `
-        <div class="product-card" onclick="showProduct(${p.id})">
-            <div class="product-header">
-                <div class="product-title">${p.title}</div>
-                <div class="product-badge">${p.badge}</div>
+    grid.innerHTML = '<div class="loading">Загрузка...</div>';
+
+    try {
+        let products = await loadProducts();
+        console.log('Loaded products:', products);
+
+        if (currentCategory !== 'all') {
+            products = products.filter(p => p.category === currentCategory);
+        }
+
+        if (products.length === 0) {
+            grid.innerHTML = '<div class="empty-state"><p>Ничего не найдено</p></div>';
+            return;
+        }
+
+        grid.innerHTML = products.map(p => {
+            const available = p.available || 0;
+            const isOutOfStock = available === 0;
+            const badgeText = p.badge || '';
+            const btnClass = isOutOfStock ? 'btn-add disabled' : 'btn-add';
+            const btnText = isOutOfStock ? 'Нет в наличии' : 'В корзину';
+            const stockText = available > 0 ? `В наличии: ${available}` : 'Нет в наличии';
+            const stockColor = isOutOfStock ? '#ff6b6b' : '#4ecdc4';
+
+            return `
+            <div class="product-card ${isOutOfStock ? 'out-of-stock' : ''}">
+                <div class="product-header" onclick="showProduct(${p.id})">
+                    <div class="product-title">${p.title || 'Без названия'}</div>
+                    ${badgeText ? `<div class="product-badge">${badgeText}</div>` : ''}
+                </div>
+                <div class="product-tags" onclick="showProduct(${p.id})">
+                    <span class="product-tag">${p.country ? p.country.toUpperCase() : ''}</span>
+                    <span class="product-tag">${p.age || ''}</span>
+                </div>
+                <div class="product-stock" style="font-size:12px;color:${stockColor};margin:5px 0;padding:0 15px;">
+                    ${stockText}
+                </div>
+                <div class="product-footer">
+                    <div class="product-price">${p.price || 0} $</div>
+                    <button class="${btnClass}" ${isOutOfStock ? 'disabled' : `onclick="addToCart(${p.id})"`}>${btnText}</button>
+                </div>
             </div>
-            <div class="product-tags">
-                <span class="product-tag">${p.country?.toUpperCase()}</span>
-                <span class="product-tag">${p.age}</span>
-            </div>
-            <div class="product-footer">
-                <div class="product-price">${p.price} $</div>
-                <button class="btn-add" onclick="event.stopPropagation(); addToCart(${p.id})">В корзину</button>
-            </div>
-        </div>
-    `).join('');
+        `}).join('');
+
+        console.log('Products rendered:', products.length);
+
+    } catch (e) {
+        console.error('Render products error:', e);
+        grid.innerHTML = '<div class="empty-state"><p>Ошибка загрузки товаров</p></div>';
+    }
 }
 
 async function loadProductDetail(productId) {
     try {
         const response = await fetch(API_URL + '/products/' + productId);
-        currentProduct = await response.json();
-        const specs = currentProduct.specs || {};
+        const result = await response.json();
+        currentProduct = result.data || result;
+
+        const available = currentProduct.available || 0;
+        const isOutOfStock = available === 0;
+        const stockText = available > 0 ? `В наличии: ${available}` : 'Нет в наличии';
+        const stockColor = isOutOfStock ? '#ff6b6b' : '#4ecdc4';
+        const btnText = isOutOfStock ? 'Нет в наличии' : 'В корзину';
+        const btnClass = isOutOfStock ? 'btn btn-primary disabled' : 'btn btn-primary';
+
         document.getElementById('productDetail').innerHTML = `
-            <div style="font-size:22px;font-weight:700;margin-bottom:10px;">${currentProduct.title}</div>
-            <div style="color:var(--text2);margin-bottom:20px;">${currentProduct.description}</div>
-            ${Object.entries(specs).map(([k,v]) => `
-                <div class="spec-row"><span class="spec-label">${k}</span><span>${v}</span></div>
-            `).join('')}
-            <div style="font-size:28px;font-weight:700;margin:20px 0;color:var(--success);">${currentProduct.price} $</div>
-            <button class="btn btn-primary" onclick="addToCart(${currentProduct.id})">В корзину</button>
+            <div style="font-size:22px;font-weight:700;margin-bottom:10px;">${currentProduct.title || 'Без названия'}</div>
+            <div style="color:var(--text2);margin-bottom:20px;">${currentProduct.description || ''}</div>
+            <div style="font-size:14px;color:${stockColor};margin-bottom:10px;">${stockText}</div>
+            <div style="font-size:28px;font-weight:700;margin:20px 0;color:var(--success);">${currentProduct.price || 0} $</div>
+            <button class="${btnClass}" ${isOutOfStock ? 'disabled' : `onclick="addToCart(${currentProduct.id})"`}>${btnText}</button>
         `;
     } catch (e) {
-        console.error('Product error:', e);
+        console.error('Product detail error:', e);
+        document.getElementById('productDetail').innerHTML = '<div style="color:#ff6b6b;">Ошибка загрузки товара</div>';
     }
 }
 
@@ -255,9 +298,21 @@ function applyFilters() {
 // ===== CART =====
 function addToCart(productId) {
     if (!currentProduct || currentProduct.id !== productId) {
-        loadProductDetail(productId).then(() => doAddToCart());
+        loadProductDetail(productId).then(() => {
+            if (currentProduct && (currentProduct.available || 0) > 0) {
+                doAddToCart();
+            } else {
+                tg.showAlert('Товар недоступен');
+            }
+        });
         return;
     }
+
+    if ((currentProduct.available || 0) === 0) {
+        tg.showAlert('Товар закончился');
+        return;
+    }
+
     doAddToCart();
 }
 
@@ -304,10 +359,10 @@ function renderCart() {
         return;
     }
 
-    const total = cart.reduce((sum, item) => sum + item.price, 0);
+    const total = cart.reduce((sum, item) => sum + (item.price || 0), 0);
     content.innerHTML = cart.map(item => `
         <div class="cart-item">
-            <div><div style="font-weight:600;">${item.title}</div><div style="color:var(--success);">${item.price} $</div></div>
+            <div><div style="font-weight:600;">${item.title || 'Без названия'}</div><div style="color:var(--success);">${item.price || 0} $</div></div>
             <button class="cart-item-remove" onclick="removeFromCart(${item.id})">Удалить</button>
         </div>
     `).join('') + `
@@ -318,7 +373,7 @@ function renderCart() {
 
 // ===== PAYMENT =====
 async function processPayment() {
-    const total = cart.reduce((sum, item) => sum + item.price, 0);
+    const total = cart.reduce((sum, item) => sum + (item.price || 0), 0);
     try {
         const response = await fetch(API_URL + '/balance/' + userId);
         const data = await response.json();
@@ -345,9 +400,28 @@ function showSuccess() {
     showScreen('successScreen');
 }
 
+// ===== STYLES =====
+const style = document.createElement('style');
+style.textContent = `
+    .product-card.out-of-stock {
+        opacity: 0.6;
+    }
+    .product-card.out-of-stock .product-title {
+        color: var(--text2);
+    }
+    .btn-add.disabled, .btn.btn-primary.disabled {
+        background: #333 !important;
+        color: #666 !important;
+        cursor: not-allowed;
+        opacity: 0.5;
+    }
+`;
+document.head.appendChild(style);
+
 // ===== INIT =====
 document.addEventListener('DOMContentLoaded', () => {
     updateCartBadge();
     tg.setHeaderColor('#1a1a2e');
     tg.setBackgroundColor('#1a1a2e');
+    console.log('App initialized');
 });

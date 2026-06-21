@@ -1,485 +1,576 @@
 import sqlite3
 import json
-from config import DATABASE_PATH
+import os
+import shutil
+import logging
+from datetime import datetime, timedelta
+from typing import Optional, List, Dict, Any
+from config import DATABASE_PATH, ENCRYPTION_KEY
+from encryption import EncryptionManager
+
+log_dir = os.path.dirname(DATABASE_PATH).replace("/db", "/logs")
+os.makedirs(log_dir, exist_ok=True)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler(os.path.join(log_dir, "db_operations.log"), encoding="utf-8"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 class Database:
-    def __init__(self):
-        self.conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
-        self.cursor = self.conn.cursor()
-        self.init_tables()
+    def __init__(self, db_path: str = DATABASE_PATH):
+        self.db_path = db_path
+        self.encryption = EncryptionManager(ENCRYPTION_KEY)
+        self._init_db()
+        self._run_backup()
 
-    def init_tables(self):
-        # ===== PRODUCTS =====
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS products (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                title TEXT NOT NULL,
-                category TEXT NOT NULL,
-                country TEXT NOT NULL,
-                age TEXT NOT NULL,
-                price REAL NOT NULL,
-                description TEXT,
-                specs TEXT,
-                badge TEXT,
-                status TEXT DEFAULT 'available',
-                login TEXT,
-                password TEXT,
-                cookies TEXT,
-                two_fa TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
+    def _get_connection(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
 
-        # ===== ORDERS =====
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS orders (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                order_id TEXT UNIQUE NOT NULL,
-                user_id INTEGER NOT NULL,
-                username TEXT,
-                first_name TEXT,
-                items TEXT NOT NULL,
-                total REAL NOT NULL,
-                status TEXT DEFAULT 'pending',
-                plisio_invoice_id TEXT,
-                plisio_status TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                paid_at TIMESTAMP
-            )
-        """)
+    def _init_db(self):
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
 
-        # ===== USERS =====
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY,
-                username TEXT,
-                first_name TEXT,
-                last_name TEXT,
-                language TEXT DEFAULT 'ru',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
+        with self._get_connection() as conn:
+            # Product Cards (karochki tovarov)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS product_cards (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    country TEXT,
+                    age TEXT,
+                    price REAL NOT NULL,
+                    badge TEXT,
+                    description TEXT,
+                    status TEXT DEFAULT 'active',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
 
-        # ===== BALANCES =====
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS balances (
-                user_id INTEGER PRIMARY KEY,
-                balance REAL DEFAULT 0.0,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users(user_id)
-            )
-        """)
+            # Accounts (konkretnye akki)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS accounts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    card_id INTEGER NOT NULL,
+                    account_id TEXT UNIQUE NOT NULL,
+                    email TEXT,
+                    password TEXT,
+                    cookies TEXT,
+                    two_fa TEXT,
+                    status TEXT DEFAULT 'available',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (card_id) REFERENCES product_cards(id)
+                )
+            """)
 
-        # ===== TRANSACTIONS =====
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS transactions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                type TEXT NOT NULL,
-                amount REAL NOT NULL,
-                status TEXT DEFAULT 'pending',
-                description TEXT,
-                plisio_invoice_id TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                completed_at TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users(user_id)
-            )
-        """)
+            # Orders
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS orders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    order_id TEXT UNIQUE NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    username TEXT,
+                    first_name TEXT,
+                    card_id INTEGER,
+                    account_id INTEGER,
+                    total REAL NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    plisio_invoice_id TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
 
-        self.conn.commit()
-        self.init_demo_products()
+            # Users
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER UNIQUE NOT NULL,
+                    username TEXT,
+                    first_name TEXT,
+                    last_name TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
 
-    def init_demo_products(self):
-        self.cursor.execute("SELECT COUNT(*) FROM products")
-        if self.cursor.fetchone()[0] > 0:
-            return
+            # Balances
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS balances (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER UNIQUE NOT NULL,
+                    balance REAL DEFAULT 0.0,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
 
-        demo_products = [
-            {
-                'title': 'Farm-akkaunt Facebook USA',
-                'category': 'farm',
-                'country': 'usa',
-                'age': '3-6',
-                'price': 25,
-                'description': 'Kachestvenny farm-akkaunt Facebook, zaregistrirovanny v SSHA.',
-                'specs': json.dumps({
-                    'Strana': 'SSHA',
-                    'Vozrast': '3-6 mesyatsev',
-                    'Tip': 'Farm-akkaunt',
-                    'Verifikatsiya': 'Po email + telefon',
-                    'Cookies': 'Vklyucheny',
-                    '2FA': 'Otklyuchen'
-                }),
-                'badge': 'Populyarny',
-                'login': 'fb_user_usa_001@gmail.com',
-                'password': 'Pass2024!USA',
-                'cookies': 'cookies_usa_001.json',
-                'two_fa': None
-            },
-            {
-                'title': 'Business Manager UK',
-                'category': 'bm',
-                'country': 'uk',
-                'age': '6+',
-                'price': 45,
-                'description': 'Gotovy Business Manager s privyazannym reklamnym akkauntom.',
-                'specs': json.dumps({
-                    'Strana': 'Velikobritaniya',
-                    'Vozrast': '6+ mesyatsev',
-                    'Tip': 'Business Manager',
-                    'Limit': '$250/den',
-                    'Verifikatsiya': 'Polnaya',
-                    'Cookies': 'Vklyucheny'
-                }),
-                'badge': 'BM',
-                'login': 'bm_user_uk_001@gmail.com',
-                'password': 'BMpass2024!UK',
-                'cookies': 'cookies_bm_uk_001.json',
-                'two_fa': '123456'
-            },
-            {
-                'title': 'Akkaunt s zapuskom EU',
-                'category': 'launch',
-                'country': 'eu',
-                'age': '1-3',
-                'price': 35,
-                'description': 'Akkaunt s istoriey zapuska reklamy.',
-                'specs': json.dumps({
-                    'Strana': 'Evropa',
-                    'Vozrast': '1-3 mesyatsa',
-                    'Tip': 'S zapuskom',
-                    'Istoriya': 'Est zapuski',
-                    'Verifikatsiya': 'Po email',
-                    'Cookies': 'Vklyucheny'
-                }),
-                'badge': 'Zapusk',
-                'login': 'launch_eu_001@gmail.com',
-                'password': 'Launch2024!EU',
-                'cookies': 'cookies_launch_eu_001.json',
-                'two_fa': None
-            },
-            {
-                'title': 'Farm-akkaunt Facebook UK',
-                'category': 'farm',
-                'country': 'uk',
-                'age': '6+',
-                'price': 30,
-                'description': 'Premium farm-akkaunt iz Velikobritanii.',
-                'specs': json.dumps({
-                    'Strana': 'Velikobritaniya',
-                    'Vozrast': '6+ mesyatsev',
-                    'Tip': 'Farm-akkaunt',
-                    'Verifikatsiya': 'Polnaya',
-                    'Cookies': 'Vklyucheny',
-                    '2FA': 'Vklyuchen'
-                }),
-                'badge': 'VIP',
-                'login': 'farm_vip_uk_001@gmail.com',
-                'password': 'VIPfarm2024!UK',
-                'cookies': 'cookies_vip_uk_001.json',
-                'two_fa': '654321'
-            },
-            {
-                'title': 'Business Manager USA',
-                'category': 'bm',
-                'country': 'usa',
-                'age': '3-6',
-                'price': 55,
-                'description': 'Amerikansky Business Manager s povyshennym limitom.',
-                'specs': json.dumps({
-                    'Strana': 'SSHA',
-                    'Vozrast': '3-6 mesyatsev',
-                    'Tip': 'Business Manager',
-                    'Limit': '$500/den',
-                    'Verifikatsiya': 'Polnaya + BM',
-                    'Cookies': 'Vklyucheny'
-                }),
-                'badge': 'BM',
-                'login': 'bm_usa_pro_001@gmail.com',
-                'password': 'BMpro2024!USA',
-                'cookies': 'cookies_bm_usa_001.json',
-                'two_fa': '789012'
-            },
-            {
-                'title': 'Akkaunt s zapuskom USA',
-                'category': 'launch',
-                'country': 'usa',
-                'age': '3-6',
-                'price': 40,
-                'description': 'Amerikansky akkaunt s uspeshnoy istoriey zapuska.',
-                'specs': json.dumps({
-                    'Strana': 'SSHA',
-                    'Vozrast': '3-6 mesyatsev',
-                    'Tip': 'S zapuskom',
-                    'Istoriya': '5+ kampaniy',
-                    'Verifikatsiya': 'Polnaya',
-                    'Cookies': 'Vklyucheny'
-                }),
-                'badge': 'Zapusk',
-                'login': 'launch_usa_001@gmail.com',
-                'password': 'LaunchUSA2024!',
-                'cookies': 'cookies_launch_usa_001.json',
-                'two_fa': '345678'
-            },
-            {
-                'title': 'Farm-akkaunt Facebook EU',
-                'category': 'farm',
-                'country': 'eu',
-                'age': '1-3',
-                'price': 20,
-                'description': 'Evropeysky farm-akkaunt nachalnogo urovnya.',
-                'specs': json.dumps({
-                    'Strana': 'Evropa',
-                    'Vozrast': '1-3 mesyatsa',
-                    'Tip': 'Farm-akkaunt',
-                    'Verifikatsiya': 'Po email',
-                    'Cookies': 'Vklyucheny',
-                    '2FA': 'Otklyuchen'
-                }),
-                'badge': 'Novyy',
-                'login': 'farm_eu_new_001@gmail.com',
-                'password': 'NewFarm2024!EU',
-                'cookies': 'cookies_farm_eu_001.json',
-                'two_fa': None
-            },
-            {
-                'title': 'Business Manager EU',
-                'category': 'bm',
-                'country': 'eu',
-                'age': '6+',
-                'price': 50,
-                'description': 'Evropeysky Business Manager s otlichnoy reputatsiey.',
-                'specs': json.dumps({
-                    'Strana': 'Evropa',
-                    'Vozrast': '6+ mesyatsev',
-                    'Tip': 'Business Manager',
-                    'Limit': '$250/den',
-                    'Verifikatsiya': 'Polnaya',
-                    'Cookies': 'Vklyucheny'
-                }),
-                'badge': 'BM',
-                'login': 'bm_eu_001@gmail.com',
-                'password': 'BMeu2024!Pro',
-                'cookies': 'cookies_bm_eu_001.json',
-                'two_fa': '901234'
-            }
-        ]
+            # Transactions
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS transactions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    type TEXT NOT NULL,
+                    amount REAL NOT NULL,
+                    description TEXT,
+                    status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
 
-        for product in demo_products:
-            self.cursor.execute("""
-                INSERT INTO products (title, category, country, age, price, description, specs, badge, login, password, cookies, two_fa)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                product['title'], product['category'], product['country'], product['age'],
-                product['price'], product['description'], product['specs'], product['badge'],
-                product['login'], product['password'], product['cookies'], product['two_fa']
-            ))
+            # Audit Logs
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS audit_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    action TEXT NOT NULL,
+                    user_id INTEGER,
+                    details TEXT,
+                    ip_address TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
 
-        self.conn.commit()
+            conn.commit()
+            logger.info("Database initialized")
 
-    # ===== PRODUCTS =====
-    def get_products(self, category=None, country=None, age=None):
-        query = "SELECT * FROM products WHERE status = 'available'"
+    def _run_backup(self):
+        backup_dir = self.db_path.replace("/db/", "/backups/")
+        os.makedirs(os.path.dirname(backup_dir), exist_ok=True)
+
+        backup_file = os.path.join(
+            os.path.dirname(backup_dir),
+            f"shop_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.db"
+        )
+
+        latest_backup = None
+        if os.path.exists(os.path.dirname(backup_dir)):
+            backups = [f for f in os.listdir(os.path.dirname(backup_dir)) if f.startswith("shop_")]
+            if backups:
+                latest_backup = max(backups)
+
+        need_backup = True
+        if latest_backup:
+            backup_time_str = latest_backup.replace("shop_", "").replace(".db", "")
+            try:
+                backup_time = datetime.strptime(backup_time_str, "%Y-%m-%d_%H-%M-%S")
+                if datetime.now() - backup_time < timedelta(hours=24):
+                    need_backup = False
+            except ValueError:
+                pass
+
+        if need_backup and os.path.exists(self.db_path):
+            shutil.copy2(self.db_path, backup_file)
+            logger.info(f"Backup created: {backup_file}")
+
+    def _log_action(self, action: str, user_id: Optional[int] = None, details: str = ""):
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    "INSERT INTO audit_logs (action, user_id, details) VALUES (?, ?, ?)",
+                    (action, user_id, details)
+                )
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Logging error: {e}")
+
+    # ===== PRODUCT CARDS =====
+    def create_card(self, title: str, category: str, country: str, age: str, 
+                    price: float, badge: str = "", description: str = "") -> int:
+        """Create new product card"""
+        with self._get_connection() as conn:
+            cursor = conn.execute("""
+                INSERT INTO product_cards (title, category, country, age, price, badge, description)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (title, category, country, age, price, badge, description))
+            conn.commit()
+            card_id = cursor.lastrowid
+
+            self._log_action("CREATE_CARD", details=f"ID={card_id}, title={title}")
+            logger.info(f"Card created: ID={card_id}")
+            return card_id
+
+    def get_card(self, card_id: int) -> Optional[Dict]:
+        """Get card by ID"""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM product_cards WHERE id = ?", (card_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def get_all_cards(self, category: Optional[str] = None) -> List[Dict]:
+        """Get all cards"""
+        query = "SELECT * FROM product_cards WHERE status = 'active'"
         params = []
-
-        if category and category != 'all':
+        if category:
             query += " AND category = ?"
             params.append(category)
-        if country and country != 'all':
-            query += " AND country = ?"
-            params.append(country)
-        if age and age != 'all':
-            query += " AND age = ?"
-            params.append(age)
+        query += " ORDER BY created_at DESC"
 
-        self.cursor.execute(query, params)
-        return [dict(row) for row in self.cursor.fetchall()]
+        with self._get_connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [dict(row) for row in rows]
 
-    def get_all_products(self):
-        self.cursor.execute("SELECT * FROM products ORDER BY id DESC")
-        return [dict(row) for row in self.cursor.fetchall()]
+    def update_card(self, card_id: int, data: Dict[str, Any]) -> bool:
+        """Update card"""
+        fields = []
+        values = []
+        for key, value in data.items():
+            if key != "id":
+                fields.append(f"{key} = ?")
+                values.append(value)
 
-    def get_product(self, product_id):
-        self.cursor.execute("SELECT * FROM products WHERE id = ?", (product_id,))
-        row = self.cursor.fetchone()
-        return dict(row) if row else None
+        values.append(card_id)
+        query = f"UPDATE product_cards SET {', '.join(fields)} WHERE id = ?"
 
-    def add_product(self, title, category, country, age, price, description, specs, badge, login, password, cookies, two_fa=None):
-        self.cursor.execute("""
-            INSERT INTO products (title, category, country, age, price, description, specs, badge, login, password, cookies, two_fa)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (title, category, country, age, price, description, json.dumps(specs), badge, login, password, cookies, two_fa))
-        self.conn.commit()
-        return self.cursor.lastrowid
+        with self._get_connection() as conn:
+            conn.execute(query, values)
+            conn.commit()
 
-    def update_product(self, product_id, **kwargs):
-        allowed = ['title', 'category', 'country', 'age', 'price', 'description', 'badge', 'login', 'password', 'cookies', 'two_fa', 'status']
-        updates = {k: v for k, v in kwargs.items() if k in allowed}
-        if not updates:
-            return False
+            self._log_action("UPDATE_CARD", details=f"ID={card_id}")
+            logger.info(f"Card updated: ID={card_id}")
+            return True
 
-        set_clause = ", ".join([f"{k} = ?" for k in updates.keys()])
-        values = list(updates.values()) + [product_id]
+    def delete_card(self, card_id: int) -> bool:
+        """Delete card (soft delete)"""
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE product_cards SET status = 'deleted' WHERE id = ?", (card_id,)
+            )
+            conn.commit()
 
-        self.cursor.execute(f"UPDATE products SET {set_clause} WHERE id = ?", values)
-        self.conn.commit()
-        return True
+            self._log_action("DELETE_CARD", details=f"ID={card_id}")
+            logger.info(f"Card deleted: ID={card_id}")
+            return True
 
-    def delete_product(self, product_id):
-        self.cursor.execute("DELETE FROM products WHERE id = ?", (product_id,))
-        self.conn.commit()
+    # ===== ACCOUNTS =====
+    def add_account(self, card_id: int, account_id: str, email: str, password: str, 
+                    cookies: str = "", two_fa: str = "") -> tuple:
+        """Add account. Returns (success: bool, message: str)"""
+        # Check duplicate by account_id
+        with self._get_connection() as conn:
+            existing = conn.execute(
+                "SELECT id FROM accounts WHERE account_id = ?", (account_id,)
+            ).fetchone()
+            if existing:
+                return False, f"Duplicate account_id: {account_id}"
 
-    def mark_product_sold(self, product_id):
-        self.cursor.execute("UPDATE products SET status = 'sold' WHERE id = ?", (product_id,))
-        self.conn.commit()
+            # Check duplicate by email
+            if email:
+                existing_email = conn.execute(
+                    "SELECT id FROM accounts WHERE email = ?", (email,)
+                ).fetchone()
+                if existing_email:
+                    return False, f"Duplicate email: {email}"
+
+            # Encrypt sensitive data
+            encrypted_password = self.encryption.encrypt(password) if password else ""
+            encrypted_cookies = self.encryption.encrypt(cookies) if cookies else ""
+            encrypted_2fa = self.encryption.encrypt(two_fa) if two_fa else ""
+
+            cursor = conn.execute("""
+                INSERT INTO accounts (card_id, account_id, email, password, cookies, two_fa)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (card_id, account_id, email, encrypted_password, encrypted_cookies, encrypted_2fa))
+            conn.commit()
+
+            self._log_action("ADD_ACCOUNT", details=f"card_id={card_id}, account_id={account_id}")
+            logger.info(f"Account added: card_id={card_id}, account_id={account_id}")
+            return True, f"Account {account_id} added successfully"
+
+    def add_accounts_batch(self, card_id: int, accounts_data: List[Dict]) -> Dict:
+        """Add multiple accounts. Returns stats"""
+        added = 0
+        skipped = 0
+        errors = []
+
+        for acc in accounts_data:
+            success, msg = self.add_account(
+                card_id=card_id,
+                account_id=acc.get("account_id", ""),
+                email=acc.get("email", ""),
+                password=acc.get("password", ""),
+                cookies=acc.get("cookies", ""),
+                two_fa=acc.get("two_fa", "")
+            )
+            if success:
+                added += 1
+            else:
+                skipped += 1
+                errors.append(msg)
+
+        return {
+            "added": added,
+            "skipped": skipped,
+            "errors": errors
+        }
+
+    def get_account(self, account_id: int) -> Optional[Dict]:
+        """Get account by ID with decryption"""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM accounts WHERE id = ?", (account_id,)
+            ).fetchone()
+
+            if row:
+                account = dict(row)
+                # Decrypt sensitive fields
+                if account.get("password"):
+                    try:
+                        account["password"] = self.encryption.decrypt(account["password"])
+                    except:
+                        pass
+                if account.get("cookies"):
+                    try:
+                        account["cookies"] = self.encryption.decrypt(account["cookies"])
+                    except:
+                        pass
+                if account.get("two_fa"):
+                    try:
+                        account["two_fa"] = self.encryption.decrypt(account["two_fa"])
+                    except:
+                        pass
+                return account
+            return None
+
+    def get_available_account(self, card_id: int) -> Optional[Dict]:
+        """Get first available account for card (FIFO)"""
+        with self._get_connection() as conn:
+            row = conn.execute("""
+                SELECT * FROM accounts 
+                WHERE card_id = ? AND status = 'available' 
+                ORDER BY created_at ASC 
+                LIMIT 1
+            """, (card_id,)).fetchone()
+
+            if row:
+                return self.get_account(row["id"])
+            return None
+
+    def mark_account_sold(self, account_id: int) -> bool:
+        """Mark account as sold"""
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE accounts SET status = 'sold' WHERE id = ?", (account_id,)
+            )
+            conn.commit()
+            logger.info(f"Account marked as sold: ID={account_id}")
+            return True
+
+    def get_card_accounts(self, card_id: int, status: Optional[str] = None) -> List[Dict]:
+        """Get all accounts for card"""
+        query = "SELECT id, account_id, email, status, created_at FROM accounts WHERE card_id = ?"
+        params = [card_id]
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        query += " ORDER BY created_at ASC"
+
+        with self._get_connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_card_stats(self, card_id: int) -> Dict:
+        """Get account stats for card"""
+        with self._get_connection() as conn:
+            total = conn.execute(
+                "SELECT COUNT(*) as count FROM accounts WHERE card_id = ?", (card_id,)
+            ).fetchone()["count"]
+
+            available = conn.execute(
+                "SELECT COUNT(*) as count FROM accounts WHERE card_id = ? AND status = 'available'",
+                (card_id,)
+            ).fetchone()["count"]
+
+            sold = conn.execute(
+                "SELECT COUNT(*) as count FROM accounts WHERE card_id = ? AND status = 'sold'",
+                (card_id,)
+            ).fetchone()["count"]
+
+            return {"total": total, "available": available, "sold": sold}
 
     # ===== ORDERS =====
-    def create_order(self, order_id, user_id, username, first_name, items, total, plisio_invoice_id=None):
-        self.cursor.execute("""
-            INSERT INTO orders (order_id, user_id, username, first_name, items, total, plisio_invoice_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (order_id, user_id, username, first_name, json.dumps(items), total, plisio_invoice_id))
-        self.conn.commit()
-        return order_id
+    def create_order(self, order_id: str, user_id: int, username: str, 
+                     first_name: str, card_id: int, account_id: int, total: float) -> bool:
+        """Create order"""
+        with self._get_connection() as conn:
+            conn.execute("""
+                INSERT INTO orders (order_id, user_id, username, first_name, card_id, account_id, total)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (order_id, user_id, username, first_name, card_id, account_id, total))
+            conn.commit()
 
-    def get_order(self, order_id):
-        self.cursor.execute("SELECT * FROM orders WHERE order_id = ?", (order_id,))
-        row = self.cursor.fetchone()
-        if row:
-            order = dict(row)
-            order['items'] = json.loads(order['items'])
-            return order
-        return None
+            self._log_action("CREATE_ORDER", user_id, f"order_id={order_id}, card_id={card_id}")
+            logger.info(f"Order created: {order_id}")
+            return True
 
-    def get_all_orders(self):
-        self.cursor.execute("SELECT * FROM orders ORDER BY created_at DESC")
-        orders = []
-        for row in self.cursor.fetchall():
-            order = dict(row)
-            order['items'] = json.loads(order['items'])
-            orders.append(order)
-        return orders
+    def update_order_status(self, order_id: str, status: str, 
+                            plisio_invoice_id: Optional[str] = None) -> bool:
+        with self._get_connection() as conn:
+            if plisio_invoice_id:
+                conn.execute(
+                    "UPDATE orders SET status = ?, plisio_invoice_id = ? WHERE order_id = ?",
+                    (status, plisio_invoice_id, order_id)
+                )
+            else:
+                conn.execute(
+                    "UPDATE orders SET status = ? WHERE order_id = ?",
+                    (status, order_id)
+                )
+            conn.commit()
 
-    def update_order_status(self, order_id, status, plisio_status=None):
-        if plisio_status:
-            self.cursor.execute(
-                "UPDATE orders SET status = ?, plisio_status = ? WHERE order_id = ?",
-                (status, plisio_status, order_id)
-            )
-        else:
-            self.cursor.execute("UPDATE orders SET status = ? WHERE order_id = ?", (status, order_id))
-        self.conn.commit()
+            self._log_action("UPDATE_ORDER", details=f"order_id={order_id}, status={status}")
+            logger.info(f"Order status updated: {order_id} -> {status}")
+            return True
 
-    def get_user_orders(self, user_id):
-        self.cursor.execute("SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
-        orders = []
-        for row in self.cursor.fetchall():
-            order = dict(row)
-            order['items'] = json.loads(order['items'])
-            orders.append(order)
-        return orders
+    def get_user_orders(self, user_id: int) -> List[Dict]:
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC",
+                (user_id,)
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_all_orders(self, status: Optional[str] = None) -> List[Dict]:
+        query = "SELECT * FROM orders"
+        params = []
+        if status:
+            query += " WHERE status = ?"
+            params.append(status)
+        query += " ORDER BY created_at DESC"
+
+        with self._get_connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [dict(row) for row in rows]
 
     # ===== USERS =====
-    def add_user(self, user_id, username, first_name, last_name):
-        self.cursor.execute("""
-            INSERT OR REPLACE INTO users (user_id, username, first_name, last_name, last_active)
-            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-        """, (user_id, username, first_name, last_name))
-        self.conn.commit()
+    def add_user(self, user_id: int, username: str, first_name: str, last_name: str):
+        with self._get_connection() as conn:
+            conn.execute("""
+                INSERT OR IGNORE INTO users (user_id, username, first_name, last_name)
+                VALUES (?, ?, ?, ?)
+            """, (user_id, username, first_name, last_name))
+            conn.commit()
 
-    def get_user(self, user_id):
-        self.cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
-        row = self.cursor.fetchone()
-        return dict(row) if row else None
+    def get_user(self, user_id: int) -> Optional[Dict]:
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM users WHERE user_id = ?", (user_id,)
+            ).fetchone()
+            return dict(row) if row else None
 
     # ===== BALANCE =====
-    def get_balance(self, user_id):
-        self.cursor.execute("SELECT balance FROM balances WHERE user_id = ?", (user_id,))
-        row = self.cursor.fetchone()
-        if row:
-            return row[0]
-        self.cursor.execute("INSERT INTO balances (user_id, balance) VALUES (?, 0.0)", (user_id,))
-        self.conn.commit()
-        return 0.0
+    def get_balance(self, user_id: int) -> float:
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT balance FROM balances WHERE user_id = ?", (user_id,)
+            ).fetchone()
+            return row["balance"] if row else 0.0
 
-    def add_balance(self, user_id, amount):
-        self.cursor.execute("""
-            INSERT INTO balances (user_id, balance) VALUES (?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET balance = balance + ?, updated_at = CURRENT_TIMESTAMP
-        """, (user_id, amount, amount))
-        self.conn.commit()
+    def add_balance(self, user_id: int, amount: float) -> bool:
+        with self._get_connection() as conn:
+            conn.execute("""
+                INSERT INTO balances (user_id, balance) VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET 
+                    balance = balance + excluded.balance,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (user_id, amount))
+            conn.commit()
 
-    def deduct_balance(self, user_id, amount):
+            self._log_action("ADD_BALANCE", user_id, f"amount={amount}")
+            logger.info(f"Balance added: user_id={user_id}, amount={amount}")
+            return True
+
+    def deduct_balance(self, user_id: int, amount: float) -> bool:
         current = self.get_balance(user_id)
         if current < amount:
             return False
-        self.cursor.execute("""
-            UPDATE balances SET balance = balance - ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?
-        """, (amount, user_id))
-        self.conn.commit()
-        return True
+
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE balances SET balance = balance - ? WHERE user_id = ?",
+                (amount, user_id)
+            )
+            conn.commit()
+
+            self._log_action("DEDUCT_BALANCE", user_id, f"amount={amount}")
+            logger.info(f"Balance deducted: user_id={user_id}, amount={amount}")
+            return True
 
     # ===== TRANSACTIONS =====
-    def create_transaction(self, user_id, type, amount, description=None, plisio_invoice_id=None):
-        self.cursor.execute("""
-            INSERT INTO transactions (user_id, type, amount, description, plisio_invoice_id)
-            VALUES (?, ?, ?, ?, ?)
-        """, (user_id, type, amount, description, plisio_invoice_id))
-        self.conn.commit()
-        return self.cursor.lastrowid
+    def add_transaction(self, user_id: int, type_: str, amount: float, 
+                        description: str = "") -> int:
+        with self._get_connection() as conn:
+            cursor = conn.execute("""
+                INSERT INTO transactions (user_id, type, amount, description)
+                VALUES (?, ?, ?, ?)
+            """, (user_id, type_, amount, description))
+            conn.commit()
+            return cursor.lastrowid
 
-    def get_user_transactions(self, user_id):
-        self.cursor.execute("""
-            SELECT * FROM transactions WHERE user_id = ? ORDER BY created_at DESC
-        """, (user_id,))
-        return [dict(row) for row in self.cursor.fetchall()]
-
-    def update_transaction_status(self, transaction_id, status):
-        self.cursor.execute("""
-            UPDATE transactions SET status = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?
-        """, (status, transaction_id))
-        self.conn.commit()
-
-    def get_transaction_by_plisio_id(self, plisio_invoice_id):
-        self.cursor.execute("SELECT * FROM transactions WHERE plisio_invoice_id = ?", (plisio_invoice_id,))
-        row = self.cursor.fetchone()
-        return dict(row) if row else None
+    def get_user_transactions(self, user_id: int) -> List[Dict]:
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM transactions WHERE user_id = ? ORDER BY created_at DESC",
+                (user_id,)
+            ).fetchall()
+            return [dict(row) for row in rows]
 
     # ===== STATS =====
-    def get_stats(self):
-        self.cursor.execute("SELECT COUNT(*) FROM products")
-        total_products = self.cursor.fetchone()[0]
+    def get_stats(self) -> Dict:
+        with self._get_connection() as conn:
+            total_cards = conn.execute(
+                "SELECT COUNT(*) as count FROM product_cards WHERE status = 'active'"
+            ).fetchone()["count"]
 
-        self.cursor.execute("SELECT COUNT(*) FROM products WHERE status = 'available'")
-        available_products = self.cursor.fetchone()[0]
+            total_accounts = conn.execute(
+                "SELECT COUNT(*) as count FROM accounts"
+            ).fetchone()["count"]
 
-        self.cursor.execute("SELECT COUNT(*) FROM orders")
-        total_orders = self.cursor.fetchone()[0]
+            available_accounts = conn.execute(
+                "SELECT COUNT(*) as count FROM accounts WHERE status = 'available'"
+            ).fetchone()["count"]
 
-        self.cursor.execute("SELECT COUNT(*) FROM orders WHERE status = 'paid'")
-        paid_orders = self.cursor.fetchone()[0]
+            sold_accounts = conn.execute(
+                "SELECT COUNT(*) as count FROM accounts WHERE status = 'sold'"
+            ).fetchone()["count"]
 
-        self.cursor.execute("SELECT COALESCE(SUM(total), 0) FROM orders WHERE status = 'paid'")
-        total_revenue = self.cursor.fetchone()[0]
+            total_orders = conn.execute(
+                "SELECT COUNT(*) as count FROM orders"
+            ).fetchone()["count"]
 
-        self.cursor.execute("SELECT COUNT(*) FROM users")
-        total_users = self.cursor.fetchone()[0]
+            paid_orders = conn.execute(
+                "SELECT COUNT(*) as count FROM orders WHERE status = 'paid'"
+            ).fetchone()["count"]
 
-        self.cursor.execute("SELECT COALESCE(SUM(balance), 0) FROM balances")
-        total_balance = self.cursor.fetchone()[0]
+            revenue = conn.execute(
+                "SELECT COALESCE(SUM(total), 0) as sum FROM orders WHERE status = 'paid'"
+            ).fetchone()["sum"]
 
-        return {
-            'total_products': total_products,
-            'available_products': available_products,
-            'sold_products': total_products - available_products,
-            'total_orders': total_orders,
-            'paid_orders': paid_orders,
-            'pending_orders': total_orders - paid_orders,
-            'total_revenue': total_revenue,
-            'total_users': total_users,
-            'total_balance': total_balance
-        }
+            users = conn.execute(
+                "SELECT COUNT(*) as count FROM users"
+            ).fetchone()["count"]
 
+            return {
+                "total_cards": total_cards,
+                "total_accounts": total_accounts,
+                "available_accounts": available_accounts,
+                "sold_accounts": sold_accounts,
+                "total_orders": total_orders,
+                "paid_orders": paid_orders,
+                "total_revenue": revenue,
+                "total_users": users
+            }
+
+    def get_audit_logs(self, limit: int = 100) -> List[Dict]:
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT ?",
+                (limit,)
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+# Global instance
 db = Database()
