@@ -11,6 +11,9 @@ shop.db
 cookies/
 cookies.json
 
+# ===== NGINX (generated config) =====
+nginx/conf/nginx.conf
+
 # ===== PYTHON =====
 __pycache__/
 *.py[cod]
