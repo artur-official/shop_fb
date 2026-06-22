@@ -22,6 +22,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class Database:
+    # Разрешённые поля для обновления карточки (защита от SQL-инъекции)
+    ALLOWED_CARD_FIELDS = {
+        "title", "category", "country", "age", 
+        "price", "badge", "description", "status"
+    }
+
     def __init__(self, db_path: str = DATABASE_PATH):
         self.db_path = db_path
         self.encryption = EncryptionManager(ENCRYPTION_KEY)
@@ -188,9 +194,9 @@ class Database:
             conn.commit()
             card_id = cursor.lastrowid
 
-            self._log_action("CREATE_CARD", details=f"ID={card_id}, title={title}")
-            logger.info(f"Card created: ID={card_id}")
-            return card_id
+        self._log_action("CREATE_CARD", details=f"ID={card_id}, title={title}")
+        logger.info(f"Card created: ID={card_id}")
+        return card_id
 
     def get_card(self, card_id: int) -> Optional[Dict]:
         """Get card by ID"""
@@ -214,13 +220,24 @@ class Database:
             return [dict(row) for row in rows]
 
     def update_card(self, card_id: int, data: Dict[str, Any]) -> bool:
-        """Update card"""
+        """Update card. Only allowed fields can be modified."""
+        # Фильтруем только разрешённые поля (защита от SQL-инъекции)
+        safe_data = {}
+        for key, value in data.items():
+            if key in self.ALLOWED_CARD_FIELDS:
+                safe_data[key] = value
+            else:
+                logger.warning(f"Ignored unsafe field: {key}")
+
+        if not safe_data:
+            logger.warning(f"No valid fields to update for card {card_id}")
+            return False
+
         fields = []
         values = []
-        for key, value in data.items():
-            if key != "id":
-                fields.append(f"{key} = ?")
-                values.append(value)
+        for key, value in safe_data.items():
+            fields.append(f"{key} = ?")
+            values.append(value)
 
         values.append(card_id)
         query = f"UPDATE product_cards SET {', '.join(fields)} WHERE id = ?"
@@ -229,9 +246,9 @@ class Database:
             conn.execute(query, values)
             conn.commit()
 
-            self._log_action("UPDATE_CARD", details=f"ID={card_id}")
-            logger.info(f"Card updated: ID={card_id}")
-            return True
+        self._log_action("UPDATE_CARD", details=f"ID={card_id}, fields={list(safe_data.keys())}")
+        logger.info(f"Card updated: ID={card_id}, fields={list(safe_data.keys())}")
+        return True
 
     def delete_card(self, card_id: int) -> bool:
         """Delete card (soft delete)"""
@@ -241,9 +258,9 @@ class Database:
             )
             conn.commit()
 
-            self._log_action("DELETE_CARD", details=f"ID={card_id}")
-            logger.info(f"Card deleted: ID={card_id}")
-            return True
+        self._log_action("DELETE_CARD", details=f"ID={card_id}")
+        logger.info(f"Card deleted: ID={card_id}")
+        return True
 
     # ===== ACCOUNTS =====
     def add_account(self, card_id: int, account_id: str, email: str, password: str, 

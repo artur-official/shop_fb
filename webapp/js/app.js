@@ -3,6 +3,15 @@ tg.ready();
 tg.expand();
 
 const API_URL = 'https://ingria-farm.com/api';
+
+// ===== API HELPERS =====
+function getAuthHeaders() {
+    return {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': tg.initData || ''
+    };
+}
+
 let cart = JSON.parse(localStorage.getItem('fb_cart')) || [];
 let currentCategory = 'all';
 let currentProduct = null;
@@ -60,6 +69,102 @@ function showCheckout() {
     showScreen('checkoutScreen');
 }
 
+// ===== CHECKOUT MODAL =====
+let checkoutQuantity = 1;
+let checkoutProduct = null;
+
+function showCheckoutModal(product) {
+    checkoutProduct = product;
+    checkoutQuantity = 1;
+
+    // Получаем title из currentProduct или используем placeholder
+    let title = 'Товар';
+    if (checkoutProduct.title) {
+        title = checkoutProduct.title;
+    } else if (currentProduct && currentProduct.id === checkoutProduct.id) {
+        title = currentProduct.title;
+    }
+
+    const modal = document.createElement('div');
+    modal.id = 'checkoutModal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Оформление заказа</h3>
+                <button class="modal-close" onclick="closeCheckoutModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="checkout-product">
+                    <div class="checkout-title">${title}</div>
+                </div>
+                <div class="checkout-quantity">
+                    <button onclick="changeQuantity(-1)">−</button>
+                    <span id="checkoutQty">1</span>
+                    <button onclick="changeQuantity(1)">+</button>
+                </div>
+                <div class="checkout-total">
+                    <span id="checkoutTotal">${product.price} USD</span>
+                    <small>СУММА К ОПЛАТЕ (ЗА 1 ШТ.)</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeCheckoutModal()">ЗАКРЫТЬ</button>
+                <button class="btn btn-primary" onclick="confirmQuantity()">ПОДТВЕРДИТЬ</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+}
+
+function changeQuantity(delta) {
+    checkoutQuantity += delta;
+    if (checkoutQuantity < 1) checkoutQuantity = 1;
+    document.getElementById('checkoutQty').textContent = checkoutQuantity;
+    document.getElementById('checkoutTotal').textContent = (checkoutProduct.price * checkoutQuantity) + ' USD';
+}
+
+function closeCheckoutModal() {
+    const modal = document.getElementById('checkoutModal');
+    if (modal) modal.remove();
+}
+
+function confirmQuantity() {
+    closeCheckoutModal();
+    showTermsModal();
+}
+
+// ===== TERMS MODAL =====
+function showTermsModal() {
+    const modal = document.createElement('div');
+    modal.id = 'termsModal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>⚠️ Обратите внимание</h3>
+            </div>
+            <div class="modal-body">
+                <p>Продолжая покупку, вы подтверждаете, что внимательно ознакомились с описанием товара и гарантийными условиями:</p>
+                <p><a href="https://telegra.ph/GARANTIJNYE-MOMENTY-KING-AKKAUNTOV-03-11" target="_blank">https://telegra.ph/GARANTIJNYE-MOMENTY-KING-AKKAUNTOV-03-11</a></p>
+                <p>Важно: видео-селфи, плашки WhatsApp, «на номер» и «на первые добавленные контакты» не являются гарантийным случаем.</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeTermsModal()">ОТМЕНА</button>
+                <button class="btn btn-primary" onclick="processPayment()">ДА, ПРОДОЛЖИТЬ</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+}
+
+function closeTermsModal() {
+    const modal = document.getElementById('termsModal');
+    if (modal) modal.remove();
+}
+
 function updateNavActive(index) {
     document.querySelectorAll('.nav-btn').forEach((btn, i) => {
         btn.classList.toggle('active', i === index);
@@ -96,7 +201,9 @@ function showProfileTab(tabName) {
 // ===== USER DATA =====
 async function loadUserProfile() {
     try {
-        const response = await fetch(API_URL + '/user/' + userId);
+        const response = await fetch(API_URL + '/user/me', {
+            headers: getAuthHeaders()
+        });
         const data = await response.json();
         if (data.status === 'success') {
             userBalance = data.data?.balance || 0;
@@ -116,7 +223,9 @@ async function loadUserOrders() {
     if (!container) return;
 
     try {
-        const response = await fetch(API_URL + '/orders/' + userId);
+        const response = await fetch(API_URL + '/orders/me', {
+            headers: getAuthHeaders()
+        });
         const data = await response.json();
         const orders = data.data || [];
 
@@ -149,7 +258,9 @@ async function loadUserTransactions() {
     if (!container) return;
 
     try {
-        const response = await fetch(API_URL + '/transactions/' + userId);
+        const response = await fetch(API_URL + '/transactions/me', {
+            headers: getAuthHeaders()
+        });
         const data = await response.json();
         const transactions = data.data || [];
 
@@ -226,7 +337,7 @@ async function renderProducts() {
             const isOutOfStock = available === 0;
             const badgeText = p.badge || '';
             const btnClass = isOutOfStock ? 'btn-add disabled' : 'btn-add';
-            const btnText = isOutOfStock ? 'Нет в наличии' : 'В корзину';
+            const btnText = isOutOfStock ? 'Нет в наличии' : 'Купить';
             const stockText = available > 0 ? `В наличии: ${available}` : 'Нет в наличии';
             const stockColor = isOutOfStock ? '#ff6b6b' : '#4ecdc4';
 
@@ -245,7 +356,7 @@ async function renderProducts() {
                 </div>
                 <div class="product-footer">
                     <div class="product-price">${p.price || 0} $</div>
-                    <button class="${btnClass}" ${isOutOfStock ? 'disabled' : `onclick="addToCart(${p.id})"`}>${btnText}</button>
+                    <button class="${btnClass}" ${isOutOfStock ? 'disabled' : `onclick="showCheckoutModal({id: ${p.id}, price: ${p.price}})"`}>${btnText}</button>
                 </div>
             </div>
         `}).join('');
@@ -268,7 +379,7 @@ async function loadProductDetail(productId) {
         const isOutOfStock = available === 0;
         const stockText = available > 0 ? `В наличии: ${available}` : 'Нет в наличии';
         const stockColor = isOutOfStock ? '#ff6b6b' : '#4ecdc4';
-        const btnText = isOutOfStock ? 'Нет в наличии' : 'В корзину';
+        const btnText = isOutOfStock ? 'Нет в наличии' : 'Купить';
         const btnClass = isOutOfStock ? 'btn btn-primary disabled' : 'btn btn-primary';
 
         document.getElementById('productDetail').innerHTML = `
@@ -276,7 +387,7 @@ async function loadProductDetail(productId) {
             <div style="color:var(--text2);margin-bottom:20px;">${currentProduct.description || ''}</div>
             <div style="font-size:14px;color:${stockColor};margin-bottom:10px;">${stockText}</div>
             <div style="font-size:28px;font-weight:700;margin:20px 0;color:var(--success);">${currentProduct.price || 0} $</div>
-            <button class="${btnClass}" ${isOutOfStock ? 'disabled' : `onclick="addToCart(${currentProduct.id})"`}>${btnText}</button>
+            <button class="${btnClass}" ${isOutOfStock ? 'disabled' : `onclick="showCheckoutModal({id: ${currentProduct.id}, price: ${currentProduct.price}})"`}>${btnText}</button>
         `;
     } catch (e) {
         console.error('Product detail error:', e);
@@ -373,22 +484,51 @@ function renderCart() {
 
 // ===== PAYMENT =====
 async function processPayment() {
-    const total = cart.reduce((sum, item) => sum + (item.price || 0), 0);
+    closeTermsModal();
+    const total = checkoutProduct.price * checkoutQuantity;
+
     try {
-        const response = await fetch(API_URL + '/balance/' + userId);
+        // Проверяем баланс
+        const response = await fetch(API_URL + '/balance/me', {
+            headers: getAuthHeaders()
+        });
         const data = await response.json();
+
         if ((data.balance || 0) < total) {
             tg.showAlert('Недостаточно средств. Пополните баланс.');
             return;
         }
-        tg.sendData(JSON.stringify({
-            action: 'create_order',
-            items: cart.map(i => ({id: i.id, title: i.title, price: i.price})),
-            total: total,
-            user_id: userId
-        }));
-        showSuccess();
+
+        // Создаём заказ и списываем баланс
+        const orderResponse = await fetch(API_URL + '/orders/create', {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({
+                card_id: checkoutProduct.id,
+                total: total
+            })
+        });
+
+        const orderData = await orderResponse.json();
+
+        if (orderData.status === 'success') {
+            // Списываем баланс
+            await fetch(API_URL + '/balance/deduct', {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({
+                    amount: total
+                })
+            });
+
+            tg.showAlert('✅ Оплата успешна! Товар будет выдан.');
+            showSuccess();
+        } else {
+            tg.showAlert('Ошибка создания заказа');
+        }
+
     } catch (e) {
+        console.error('Payment error:', e);
         tg.showAlert('Ошибка оплаты');
     }
 }
@@ -414,6 +554,97 @@ style.textContent = `
         color: #666 !important;
         cursor: not-allowed;
         opacity: 0.5;
+    }
+    .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.8);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+    }
+    .modal-content {
+        background: #1a1a2e;
+        border-radius: 16px;
+        width: 90%;
+        max-width: 400px;
+        padding: 20px;
+    }
+    .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+    }
+    .modal-header h3 {
+        margin: 0;
+        font-size: 18px;
+    }
+    .modal-close {
+        background: none;
+        border: none;
+        color: #fff;
+        font-size: 20px;
+        cursor: pointer;
+    }
+    .checkout-quantity {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 20px;
+        margin: 20px 0;
+    }
+    .checkout-quantity button {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        border: 1px solid #4ecdc4;
+        background: transparent;
+        color: #4ecdc4;
+        font-size: 20px;
+        cursor: pointer;
+    }
+    .checkout-quantity span {
+        font-size: 24px;
+        font-weight: bold;
+    }
+    .checkout-total {
+        text-align: center;
+        margin: 20px 0;
+    }
+    .checkout-total span {
+        font-size: 32px;
+        font-weight: bold;
+        display: block;
+    }
+    .checkout-total small {
+        color: #888;
+        font-size: 12px;
+    }
+    .modal-footer {
+        display: flex;
+        gap: 10px;
+        margin-top: 20px;
+    }
+    .modal-footer .btn {
+        flex: 1;
+        padding: 15px;
+        border-radius: 12px;
+        border: none;
+        cursor: pointer;
+        font-weight: 600;
+    }
+    .btn-secondary {
+        background: #333;
+        color: #fff;
+    }
+    .btn-primary {
+        background: #4ecdc4;
+        color: #1a1a2e;
     }
 `;
 document.head.appendChild(style);

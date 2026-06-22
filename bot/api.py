@@ -3,7 +3,7 @@ import logging
 import os
 import hmac
 import hashlib
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
@@ -15,6 +15,7 @@ from plisio_api import plisio
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from init_data import verify_init_data
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -34,11 +35,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ===== AUTH DEPENDENCY =====
+async def get_current_user(
+    x_telegram_init_data: str = Header(None, alias="X-Telegram-Init-Data")
+):
+    if not x_telegram_init_data:
+        raise HTTPException(status_code=401, detail="Missing Telegram initData")
+    
+    user = verify_init_data(x_telegram_init_data)
+    if not user:
+        raise HTTPException(status_code=403, detail="Invalid Telegram initData")
+    
+    return user
+    
 # ===== MODELS =====
 class OrderCreate(BaseModel):
-    user_id: int
-    username: str
-    first_name: str
     card_id: int
     total: float
 
@@ -119,24 +130,28 @@ async def get_product(request: Request, product_id: int):
 # ===== ORDERS =====
 @app.post("/api/orders")
 @limiter.limit("10/minute")
-async def create_order(request: Request, order: OrderCreate):
+async def create_order(request: Request, order: OrderCreate, user: dict = Depends(get_current_user)):
     """Create order"""
-    order_id = f"ORD-{order.user_id}-{int(asyncio.get_event_loop().time())}"
+    user_id = user['id']
+    username = user.get('username', '')
+    first_name = user.get('first_name', '')
+    
+    order_id = f"ORD-{user_id}-{int(asyncio.get_event_loop().time())}"
     
     account = db.get_available_account(order.card_id)
     if not account:
         raise HTTPException(status_code=400, detail="No accounts available")
     
-    db.create_order(order_id, order.user_id, order.username, order.first_name, 
+    db.create_order(order_id, user_id, username, first_name, 
                     order.card_id, account['id'], order.total)
     
     return {"status": "success", "order_id": order_id, "account_id": account['id']}
 
-@app.get("/api/orders/{user_id}")
+@app.get("/api/orders/me")
 @limiter.limit("30/minute")
-async def get_user_orders(request: Request, user_id: int):
+async def get_user_orders(request: Request, user: dict = Depends(get_current_user)):
     """Get user orders"""
-    orders = db.get_user_orders(user_id)
+    orders = db.get_user_orders(user['id'])
     return {"status": "success", "data": orders}
 
 @app.get("/api/orders/detail/{order_id}")
@@ -145,12 +160,56 @@ async def get_order_detail(request: Request, order_id: str):
     """Get order details"""
     return {"status": "success", "order_id": order_id}
 
+@app.post("/api/orders/create")
+@limiter.limit("10/minute")
+async def api_create_order(request: Request, order: OrderCreate, user: dict = Depends(get_current_user)):
+    """Create order via API with initData verification"""
+    user_id = user['id']
+    username = user.get('username', '')
+    first_name = user.get('first_name', '')
+    
+    order_id = f"ORD-{user_id}-{int(asyncio.get_event_loop().time())}"
+    
+    account = db.get_available_account(order.card_id)
+    if not account:
+        raise HTTPException(status_code=400, detail="No accounts available")
+    
+    db.create_order(order_id, user_id, username, first_name, 
+                    order.card_id, account['id'], order.total)
+    
+    # Создаём invoice через Plisio
+    invoice = await plisio.create_invoice(
+        order_id=order_id,
+        amount=order.total,
+        description=f"Заказ {order_id}"
+    )
+    
+    if invoice and invoice.get('status') == 'success':
+        invoice_data = invoice.get('data', {})
+        invoice_url = invoice_data.get('invoice_url')
+        invoice_id = invoice_data.get('id')
+        
+        db.update_order_status(order_id, 'pending', invoice_id)
+        
+        return {
+            "status": "success",
+            "order_id": order_id,
+            "invoice_url": invoice_url,
+            "invoice_id": invoice_id
+        }
+    
+    raise HTTPException(status_code=400, detail="Failed to create invoice")
+
 # ===== USERS =====
-@app.get("/api/user/{user_id}")
+@app.get("/api/user/me")
 @limiter.limit("30/minute")
-async def get_user(request: Request, user_id: int):
+async def get_user(request: Request, user: dict = Depends(get_current_user)):
     """Get user profile"""
-    user = db.get_user(user_id)
+    user_id = user['id']
+    username = user.get('username', '')
+    first_name = user.get('first_name', '')
+    
+    db_user = db.get_user(user_id)
     balance = db.get_balance(user_id)
     orders = db.get_user_orders(user_id)
     transactions = db.get_user_transactions(user_id)
@@ -158,19 +217,19 @@ async def get_user(request: Request, user_id: int):
     return {
         "status": "success",
         "data": {
-            "user": user,
+            "user": db_user,
             "balance": balance,
             "orders": orders,
             "transactions": transactions
         }
     }
-
+    
 # ===== BALANCE =====
-@app.get("/api/balance/{user_id}")
+@app.get("/api/balance/me")
 @limiter.limit("30/minute")
-async def get_balance(request: Request, user_id: int):
+async def get_balance(request: Request, user: dict = Depends(get_current_user)):
     """Get user balance"""
-    balance = db.get_balance(user_id)
+    balance = db.get_balance(user['id'])
     return {"status": "success", "balance": balance}
 
 @app.post("/api/balance/deposit")
@@ -198,11 +257,11 @@ async def confirm_deposit(request: Request, confirm: DepositConfirm):
     return {"status": "success", "balance": db.get_balance(confirm.user_id)}
 
 # ===== TRANSACTIONS =====
-@app.get("/api/transactions/{user_id}")
+@app.get("/api/transactions/me")
 @limiter.limit("30/minute")
-async def get_transactions(request: Request, user_id: int):
+async def get_transactions(request: Request, user: dict = Depends(get_current_user)):
     """Get user transactions"""
-    transactions = db.get_user_transactions(user_id)
+    transactions = db.get_user_transactions(user['id'])
     return {"status": "success", "data": transactions}
 
 # ===== ADMIN =====
