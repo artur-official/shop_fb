@@ -6,7 +6,7 @@ class PlisioAPI:
         self.api_key = PLISIO_API_KEY
         self.base_url = "https://api.plisio.net/api/v1"
 
-    async def create_invoice(self, order_id, amount, description, email=None):
+    async def create_invoice(self, order_id, amount, description, email=None, network="TRC20"):
         params = {
             "api_key": self.api_key,
             "order_number": order_id,
@@ -14,7 +14,7 @@ class PlisioAPI:
             "amount": amount,
             "currency": "USD",
             "source_currency": "USDT",
-            "source_currency_network": "TRC20",
+            "source_currency_network": network,
             "callback_url": PLISIO_WEBHOOK_URL,
             "email": email or "",
             "skip_confirm": "1"
