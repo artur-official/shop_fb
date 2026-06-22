@@ -1,0 +1,90 @@
+worker_processes auto;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include mime.types;
+    default_type application/octet-stream;
+    sendfile on;
+    keepalive_timeout 65;
+
+    # Rate limiting zones
+    limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;
+    limit_req_zone $binary_remote_addr zone=webhook:10m rate=5r/s;
+
+    # === HTTP → HTTPS redirect ===
+    server {
+        listen 80;
+        server_name _;
+        return 301 https://$host$request_uri;
+    }
+
+    # === HTTPS server ===
+    server {
+        listen 443 ssl;
+        server_name {{DOMAIN}};
+
+        # SSL certificates (Cloudflare Origin CA)
+        ssl_certificate {{SSL_CERT_PATH}};
+        ssl_certificate_key {{SSL_KEY_PATH}};
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+        ssl_prefer_server_ciphers off;
+
+        # Security headers
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-XSS-Protection "1; mode=block" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+        # Block hidden files
+        location ~ /\. {
+            deny all;
+            access_log off;
+            log_not_found off;
+        }
+
+        # Web App (static files)
+        location / {
+            root {{WEBAPP_ROOT}};
+            index index.html;
+            try_files $uri $uri/ /index.html;
+
+            # Cache static assets
+            location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+                expires 1y;
+                add_header Cache-Control "public, immutable";
+            }
+        }
+
+        # API proxy
+        location /api/ {
+            proxy_pass http://127.0.0.1:8000;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+
+            limit_req zone=api burst=20 nodelay;
+        }
+
+        # Webhook
+        location /webhook/ {
+            proxy_pass http://127.0.0.1:8000;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+            limit_req zone=webhook burst=10 nodelay;
+        }
+
+        # Health check
+        location /health {
+            proxy_pass http://127.0.0.1:8000;
+            access_log off;
+        }
+    }
+}
