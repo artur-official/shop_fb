@@ -50,9 +50,6 @@ logs/
 Thumbs.db
 desktop.ini
 
-# ===== Nginx =====
-nginx/conf/nginx.conf
-
 # ===== Backup =====
 *.bak
 *.backup
